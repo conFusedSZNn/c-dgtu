@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <ctime>
 #include <random>
-#include <filesystem>
+#include <algorithm> // нужно для std::remove и std::find
 
 // Шаблонный класс Logger для записи логов
 template<typename T>
@@ -70,7 +70,6 @@ public:
 class Skeleton : public Monster {
 public:
     Skeleton() : Monster("Skeleton", 40, 10, 5) {
-        // Скелеты имеют повышенную защиту
         defense += 3;
     }
 };
@@ -208,26 +207,29 @@ public:
             throw std::runtime_error("Cannot open save file");
         }
 
-        file >> name >> health >> maxHealth >> attack >> defense >> level >> experience;
+        if (!(file >> name >> health >> maxHealth >> attack >> defense >> level >> experience)) {
+            throw std::runtime_error("Corrupted save file format");
+        }
     }
 
     bool isAlive() const { return health > 0; }
     std::string getName() const { return name; }
+    int getDefense() const { return defense; }  // добавлен getter
+    bool hasItem(const std::string& item) const { return inventory.hasItem(item); }
 };
 
 // Класс Game
 class Game {
 private:
     Character player;
-    std::vector<std::unique_ptr<Monster>> monsters;
     Logger<std::string> logger;
 
-    std::unique_ptr<Monster> generateMonster() {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        static std::uniform_int_distribution<> dis(1, 3);
+    std::mt19937 gen;
+    std::uniform_int_distribution<> monsterDist;
 
-        switch (dis(gen)) {
+    std::unique_ptr<Monster> generateMonster() {
+        int choice = monsterDist(gen);
+        switch (choice) {
             case 1: return std::make_unique<Goblin>();
             case 2: return std::make_unique<Skeleton>();
             case 3: return std::make_unique<Dragon>();
@@ -239,7 +241,6 @@ private:
         logger.log("Battle started with " + monster.getName());
         
         while (player.isAlive() && monster.isAlive()) {
-            // Ход игрока
             std::cout << "\n=== Your turn ===\n";
             player.displayInfo();
             monster.displayInfo();
@@ -247,7 +248,7 @@ private:
             
             int choice;
             std::cin >> choice;
-            
+
             try {
                 switch (choice) {
                     case 1:
@@ -273,12 +274,11 @@ private:
                 throw;
             }
 
-            // Ход монстра
             if (monster.isAlive()) {
                 std::cout << "\n=== Monster's turn ===\n";
                 int damage = monster.getAttack() - player.getDefense() / 2;
                 if (damage < 1) damage = 1;
-                
+
                 try {
                     player.takeDamage(damage);
                     std::cout << monster.getName() << " attacks you for " << damage << " damage!\n";
@@ -294,13 +294,9 @@ private:
             player.gainExperience(exp);
             std::cout << "You defeated the " << monster.getName() << " and gained " << exp << " EXP!\n";
             logger.log("Player defeated " + monster.getName() + " and gained " + std::to_string(exp) + " EXP");
-            
-            // Награда за победу
-            static std::random_device rd;
-            static std::mt19937 gen(rd());
-            static std::uniform_int_distribution<> dis(1, 3);
-            
-            if (dis(gen) == 1) {
+
+            std::uniform_int_distribution<> dropDist(1, 3);
+            if (dropDist(gen) == 1) {
                 player.addToInventory("Health Potion");
                 std::cout << "You found a Health Potion!\n";
             }
@@ -309,7 +305,8 @@ private:
 
 public:
     Game(const std::string& playerName) 
-        : player(playerName), logger("game_log.txt") {}
+        : player(playerName), logger("game_log.txt"),
+          gen(std::random_device{}()), monsterDist(1, 3) {}
 
     void start() {
         std::cout << "Welcome to Text RPG, " << player.getName() << "!\n";
@@ -358,13 +355,13 @@ int main() {
         std::cout << "Enter your character name: ";
         std::string name;
         std::cin >> name;
-        
+
         Game game(name);
         game.start();
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
         return 1;
     }
-    
+
     return 0;
 }
